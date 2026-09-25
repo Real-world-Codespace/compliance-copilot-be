@@ -1,6 +1,8 @@
 import bcrypt
+from datetime import UTC, datetime
 from sqlalchemy import inspect, select, text
-from .database import AppUser, Base, Organization, PolicyDocument, SessionLocal, engine
+from .database import AppUser, Base, DocumentChunk, KnowledgeDocument, Organization, PolicyDocument, SessionLocal, engine
+from .rag import chunk_text, embed
 
 POLICIES = [
  {"id":"proc-approval","title":"Procurement Approval Matrix 2026","category":"approval","classification":"internal","allowed_departments":["procurement","finance","operations"],"allowed_roles":["requester","procurement_manager","finance_manager"],"content":"Mua sắm dưới 20 000 000 VND cần Budget Owner. Từ 20 000 000 đến dưới 100 000 000 VND cần Procurement Manager và Budget Owner. Từ 100 000 000 VND trở lên cần Finance Manager; trên 500 000 000 VND cần CFO. Hợp đồng từ 12 tháng cần Legal review trước khi ký."},
@@ -10,14 +12,37 @@ POLICIES = [
 ]
 
 USERS = [
- {"id":"u-lan","organization_id":"acme-retail","name":"Lan Nguyen","email":"lan.procurement@acme.example","department":"procurement","roles":["requester","procurement_manager"]},
+ {"id":"u-lan","organization_id":"acme-retail","name":"Lan Nguyen","email":"lan.procurement@acme.example","department":"procurement","roles":["requester","procurement_manager","workspace_admin"]},
  {"id":"u-minh","organization_id":"acme-retail","name":"Minh Tran","email":"minh.finance@acme.example","department":"finance","roles":["requester","finance_manager"]},
  {"id":"u-quang","organization_id":"acme-retail","name":"Quang Le","email":"quang.engineering@acme.example","department":"engineering","roles":["requester"]},
  {"id":"u-orion","organization_id":"orion-health","name":"Hoa Vo","email":"hoa.finance@orion.example","department":"finance","roles":["requester","finance_manager"]},
 ]
 
 def initialize_database():
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as connection:
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(engine)
+    # Compatibility columns for local databases created by earlier project iterations.
+    document_columns = {
+        "original_filename": "VARCHAR(255)", "content_type": "VARCHAR(120)", "file_size": "INTEGER",
+        "checksum": "VARCHAR(64)", "storage_key": "VARCHAR(1000)", "status": "VARCHAR(30)",
+        "status_message": "TEXT",
+    }
+    existing_document_columns = {column["name"] for column in inspect(engine).get_columns("knowledge_documents")}
+    with engine.begin() as connection:
+        for name, definition in document_columns.items():
+            if name not in existing_document_columns:
+                connection.execute(text(f"ALTER TABLE knowledge_documents ADD COLUMN {name} {definition}"))
+        existing_chunk_columns = {column["name"] for column in inspect(engine).get_columns("document_chunks")}
+        if "page_number" not in existing_chunk_columns:
+            connection.execute(text("ALTER TABLE document_chunks ADD COLUMN page_number INTEGER"))
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as connection:
+            connection.execute(text(
+                "CREATE INDEX IF NOT EXISTS document_chunks_embedding_hnsw_idx "
+                "ON document_chunks USING hnsw (embedding vector_cosine_ops)"
+            ))
     # Lightweight compatibility migration for local databases created before password auth.
     if "password_hash" not in {column["name"] for column in inspect(engine).get_columns("app_users")}:
         with engine.begin() as connection:
@@ -31,4 +56,26 @@ def initialize_database():
         else:
             for user in session.scalars(select(AppUser).where(AppUser.password_hash.is_(None))).all():
                 user.password_hash = bcrypt.hashpw(b"demo-password", bcrypt.gensalt()).decode()
+            lan = session.get(AppUser, "u-lan")
+            if lan and "workspace_admin" not in lan.roles:
+                lan.roles = [*lan.roles, "workspace_admin"]
+            session.commit()
+        # Existing policy seed is copied into secure chunks once. Every chunk retains its ACL metadata.
+        if session.scalar(select(DocumentChunk.id).limit(1)) is None:
+            policies = session.scalars(select(PolicyDocument)).all()
+            for policy in policies:
+                document_id = f"knowledge-{policy.id}"
+                session.add(KnowledgeDocument(
+                    id=document_id, organization_id=policy.organization_id, title=policy.title,
+                    source_type="policy", classification=policy.classification,
+                    allowed_departments=policy.allowed_departments, allowed_roles=policy.allowed_roles,
+                    created_by="system", created_at=datetime.now(UTC),
+                ))
+                for position, content in enumerate(chunk_text(policy.content)):
+                    session.add(DocumentChunk(
+                        id=f"chunk-{policy.id}-{position}", document_id=document_id,
+                        organization_id=policy.organization_id, position=position, content=content,
+                        embedding=embed(content), allowed_departments=policy.allowed_departments,
+                        allowed_roles=policy.allowed_roles, classification=policy.classification,
+                    ))
             session.commit()

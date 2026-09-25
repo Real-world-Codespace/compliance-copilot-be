@@ -7,16 +7,11 @@ from .config import JWT_SECRET
 from .database import AppUser, Organization, PolicyDocument, SessionLocal
 from .schemas import RegisterRequest, UserView
 from .seed import POLICIES
+from .rag import ingest_text
 import uuid
 
 def to_view(user: AppUser) -> UserView:
     return UserView(id=user.id, name=user.name, email=user.email, organization_id=user.organization_id, department=user.department, roles=user.roles)
-
-def login(email: str) -> tuple[str, UserView]:
-    with SessionLocal() as session: user = session.scalar(select(AppUser).where(AppUser.email == email))
-    if not user: raise HTTPException(404, "Demo user không tồn tại")
-    return jwt.encode({"sub": user.id, "exp": datetime.now(UTC) + timedelta(hours=4)}, JWT_SECRET, algorithm="HS256"), to_view(user)
-
 
 def login_with_password(email: str, password: str) -> tuple[str, UserView]:
     with SessionLocal() as session:
@@ -44,7 +39,13 @@ def register_account(payload: RegisterRequest) -> tuple[str, UserView]:
             for item in POLICIES
         ])
         session.commit()
-    return jwt.encode({"sub": user.id, "exp": datetime.now(UTC) + timedelta(hours=4)}, JWT_SECRET, algorithm="HS256"), to_view(user)
+    user_view = to_view(user)
+    for policy in POLICIES:
+        ingest_text(
+            user_view, policy["title"], policy["content"], policy["classification"],
+            policy["allowed_departments"], policy["allowed_roles"],
+        )
+    return jwt.encode({"sub": user.id, "exp": datetime.now(UTC) + timedelta(hours=4)}, JWT_SECRET, algorithm="HS256"), user_view
 
 def current_user(token: str) -> UserView:
     try: user_id = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])["sub"]

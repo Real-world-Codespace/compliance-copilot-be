@@ -1,11 +1,23 @@
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import JSON, DateTime, Numeric, String, Text, create_engine
+from sqlalchemy import JSON, DateTime, Numeric, String, Text, TypeDecorator, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
-from .config import DATABASE_URL
+from pgvector.sqlalchemy import Vector
+from .config import DATABASE_URL, EMBEDDING_DIMENSIONS
 
 
 class Base(DeclarativeBase): pass
+
+
+class EmbeddingType(TypeDecorator):
+    """Uses pgvector in PostgreSQL and JSON locally, keeping local tests portable."""
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(Vector(EMBEDDING_DIMENSIONS))
+        return dialect.type_descriptor(JSON())
 
 
 class Organization(Base):
@@ -35,6 +47,40 @@ class PolicyDocument(Base):
     allowed_departments: Mapped[list] = mapped_column(JSON)
     allowed_roles: Mapped[list] = mapped_column(JSON)
     content: Mapped[str] = mapped_column(Text)
+
+
+class KnowledgeDocument(Base):
+    __tablename__ = "knowledge_documents"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(String(64), index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    source_type: Mapped[str] = mapped_column(String(40), default="policy")
+    classification: Mapped[str] = mapped_column(String(40), index=True)
+    allowed_departments: Mapped[list] = mapped_column(JSON)
+    allowed_roles: Mapped[list] = mapped_column(JSON)
+    created_by: Mapped[str] = mapped_column(String(64))
+    original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    file_size: Mapped[int | None] = mapped_column(nullable=True)
+    checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    storage_key: Mapped[str | None] = mapped_column(String(1000), unique=True, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="ready", index=True)
+    status_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class DocumentChunk(Base):
+    __tablename__ = "document_chunks"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    document_id: Mapped[str] = mapped_column(String(64), index=True)
+    organization_id: Mapped[str] = mapped_column(String(64), index=True)
+    position: Mapped[int] = mapped_column()
+    page_number: Mapped[int | None] = mapped_column(nullable=True)
+    content: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list] = mapped_column(EmbeddingType())
+    allowed_departments: Mapped[list] = mapped_column(JSON)
+    allowed_roles: Mapped[list] = mapped_column(JSON)
+    classification: Mapped[str] = mapped_column(String(40), index=True)
 
 
 class PurchaseCheck(Base):

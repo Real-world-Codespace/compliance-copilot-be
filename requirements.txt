@@ -6,3 +6,10 @@ PyJWT==2.10.1
 pytest==8.3.4
 httpx==0.28.1
 bcrypt==4.2.1
+pgvector==0.3.6
+boto3==1.39.12
+python-multipart==0.0.20
+pypdf==5.9.0
+python-docx==1.2.0
+langchain-text-splitters==0.3.9
+langchain-openai==0.3.28

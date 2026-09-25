@@ -3,10 +3,6 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-class DemoLogin(BaseModel):
-    email: str
-
-
 class LoginRequest(BaseModel):
     email: str
     password: str = Field(min_length=8, max_length=128)
@@ -42,6 +38,28 @@ class PolicyView(BaseModel):
 class AskRequest(BaseModel):
     token: str
     question: str = Field(min_length=3, max_length=1000)
+
+
+class IngestRequest(BaseModel):
+    token: str
+    title: str = Field(min_length=3, max_length=255)
+    content: str = Field(min_length=40, max_length=100_000)
+    classification: Literal["internal", "confidential"] = "internal"
+    allowed_departments: list[str] = Field(min_length=1)
+    allowed_roles: list[str] = Field(min_length=1)
+
+
+class CitationView(BaseModel):
+    document_id: str
+    title: str
+    classification: str
+    excerpt: str
+    score: float
+
+
+class SecureAnswer(BaseModel):
+    answer: str
+    citations: list[CitationView]
 
 
 class SpendCheckRequest(BaseModel):

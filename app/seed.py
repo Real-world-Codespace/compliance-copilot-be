@@ -2,7 +2,7 @@ import bcrypt
 from datetime import UTC, datetime
 from sqlalchemy import inspect, select, text
 from .database import AppUser, Base, DocumentChunk, KnowledgeDocument, Organization, PolicyDocument, SessionLocal, engine
-from .rag import chunk_text, embed
+from .rag import chunk_text, index_chunks
 
 POLICIES = [
  {"id":"proc-approval","title":"Procurement Approval Matrix 2026","category":"approval","classification":"internal","allowed_departments":["procurement","finance","operations"],"allowed_roles":["requester","procurement_manager","finance_manager"],"content":"Mua sắm dưới 20 000 000 VND cần Budget Owner. Từ 20 000 000 đến dưới 100 000 000 VND cần Procurement Manager và Budget Owner. Từ 100 000 000 VND trở lên cần Finance Manager; trên 500 000 000 VND cần CFO. Hợp đồng từ 12 tháng cần Legal review trước khi ký."},
@@ -19,9 +19,6 @@ USERS = [
 ]
 
 def initialize_database():
-    if engine.dialect.name == "postgresql":
-        with engine.begin() as connection:
-            connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(engine)
     # Compatibility columns for local databases created by earlier project iterations.
     document_columns = {
@@ -37,12 +34,9 @@ def initialize_database():
         existing_chunk_columns = {column["name"] for column in inspect(engine).get_columns("document_chunks")}
         if "page_number" not in existing_chunk_columns:
             connection.execute(text("ALTER TABLE document_chunks ADD COLUMN page_number INTEGER"))
-    if engine.dialect.name == "postgresql":
-        with engine.begin() as connection:
-            connection.execute(text(
-                "CREATE INDEX IF NOT EXISTS document_chunks_embedding_hnsw_idx "
-                "ON document_chunks USING hnsw (embedding vector_cosine_ops)"
-            ))
+        # pgvector was used in an earlier revision. Vectors now live in Pinecone.
+        if "embedding" in existing_chunk_columns:
+            connection.execute(text("ALTER TABLE document_chunks DROP COLUMN embedding"))
     # Lightweight compatibility migration for local databases created before password auth.
     if "password_hash" not in {column["name"] for column in inspect(engine).get_columns("app_users")}:
         with engine.begin() as connection:
@@ -61,6 +55,7 @@ def initialize_database():
                 lan.roles = [*lan.roles, "workspace_admin"]
             session.commit()
         # Existing policy seed is copied into secure chunks once. Every chunk retains its ACL metadata.
+        chunks_to_index = []
         if session.scalar(select(DocumentChunk.id).limit(1)) is None:
             policies = session.scalars(select(PolicyDocument)).all()
             for policy in policies:
@@ -72,10 +67,16 @@ def initialize_database():
                     created_by="system", created_at=datetime.now(UTC),
                 ))
                 for position, content in enumerate(chunk_text(policy.content)):
-                    session.add(DocumentChunk(
+                    chunk = DocumentChunk(
                         id=f"chunk-{policy.id}-{position}", document_id=document_id,
                         organization_id=policy.organization_id, position=position, content=content,
-                        embedding=embed(content), allowed_departments=policy.allowed_departments,
+                        page_number=None, allowed_departments=policy.allowed_departments,
                         allowed_roles=policy.allowed_roles, classification=policy.classification,
-                    ))
+                    )
+                    chunks_to_index.append(chunk)
+                    session.add(chunk)
             session.commit()
+        else:
+            chunks_to_index = session.scalars(select(DocumentChunk)).all()
+    if chunks_to_index:
+        index_chunks(chunks_to_index)

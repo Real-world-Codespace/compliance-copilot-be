@@ -14,6 +14,11 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "1536"))
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "6"))
+VECTOR_STORE = os.getenv("VECTOR_STORE", "memory" if ENVIRONMENT != "production" else "pinecone").lower()
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
+PINECONE_INDEX_HOST = os.getenv("PINECONE_INDEX_HOST", "")
+PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "")
+PINECONE_NAMESPACE_PREFIX = os.getenv("PINECONE_NAMESPACE_PREFIX", "tenant-")
 
 if DATABASE_URL.startswith("sqlite"):
     (PROJECT_ROOT / "data").mkdir(exist_ok=True)

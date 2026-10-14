@@ -1,23 +1,11 @@
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import JSON, DateTime, Numeric, String, Text, TypeDecorator, create_engine
+from sqlalchemy import JSON, DateTime, Numeric, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
-from pgvector.sqlalchemy import Vector
-from .config import DATABASE_URL, EMBEDDING_DIMENSIONS
+from .config import DATABASE_URL
 
 
 class Base(DeclarativeBase): pass
-
-
-class EmbeddingType(TypeDecorator):
-    """Uses pgvector in PostgreSQL and JSON locally, keeping local tests portable."""
-    impl = JSON
-    cache_ok = True
-
-    def load_dialect_impl(self, dialect):
-        if dialect.name == "postgresql":
-            return dialect.type_descriptor(Vector(EMBEDDING_DIMENSIONS))
-        return dialect.type_descriptor(JSON())
 
 
 class Organization(Base):
@@ -77,7 +65,6 @@ class DocumentChunk(Base):
     position: Mapped[int] = mapped_column()
     page_number: Mapped[int | None] = mapped_column(nullable=True)
     content: Mapped[str] = mapped_column(Text)
-    embedding: Mapped[list] = mapped_column(EmbeddingType())
     allowed_departments: Mapped[list] = mapped_column(JSON)
     allowed_roles: Mapped[list] = mapped_column(JSON)
     classification: Mapped[str] = mapped_column(String(40), index=True)

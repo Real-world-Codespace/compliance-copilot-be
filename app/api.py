@@ -79,7 +79,7 @@ async def upload_document(
         allowed_roles=[item.strip() for item in allowed_roles.split(",") if item.strip()], created_by=user.id,
         original_filename=filename, content_type=file.content_type or "application/octet-stream", file_size=len(content),
         checksum=hashlib.sha256(content).hexdigest(), storage_key=storage_key, status="uploaded",
-        status_message="Tệp đã lưu S3, đang chờ worker tạo embeddings.", created_at=datetime.now(UTC),
+        status_message="Tệp đã lưu S3, đang chờ worker lập chỉ mục bảo mật.", created_at=datetime.now(UTC),
     )
     with SessionLocal() as session:
         session.add(document)

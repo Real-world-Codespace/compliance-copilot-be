@@ -3,14 +3,15 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, Header, HTTPException, UploadFile
+from sqlalchemy import select
 from .auth import current_user, login_with_password, register_account
 from .config import MAX_UPLOAD_SIZE_MB, S3_BUCKET, STORAGE_BACKEND
 from .database import KnowledgeDocument, SessionLocal
 from .extractor import SUPPORTED_EXTENSIONS
 from .ingestion import process_document
-from .rag import ingest_text
-from .schemas import AskRequest, AuditView, IngestRequest, LoginRequest, RegisterRequest, SecureAnswer, SpendCheckRequest
+from .rag import ingest_text, is_permitted
+from .schemas import AskRequest, AuditView, DocumentView, IngestRequest, LoginRequest, RegisterRequest, SecureAnswer, SpendCheckRequest
 from .services import answer_question, evaluate_spend, recent_audits
 from .storage import get_storage
 
@@ -46,6 +47,30 @@ def ingest_knowledge(payload: IngestRequest):
         raise HTTPException(403, "Chỉ workspace admin được nạp tri thức")
     document_id = ingest_text(user, payload.title, payload.content, payload.classification, payload.allowed_departments, payload.allowed_roles)
     return {"document_id": document_id, "status": "indexed"}
+
+
+@router.get("/documents", response_model=list[DocumentView])
+def list_documents(authorization: str = Header(default="")):
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(401, "Cần đăng nhập để xem tài liệu")
+    user = current_user(token)
+    admin = "workspace_admin" in user.roles
+    with SessionLocal() as session:
+        documents = session.scalars(
+            select(KnowledgeDocument)
+            .where(KnowledgeDocument.organization_id == user.organization_id)
+            .order_by(KnowledgeDocument.created_at.desc(), KnowledgeDocument.id)
+        ).all()
+        return [
+            DocumentView(
+                id=doc.id, title=doc.title, original_filename=doc.original_filename,
+                source_type=doc.source_type, classification=doc.classification,
+                status=doc.status, created_at=doc.created_at,
+            )
+            for doc in documents
+            if is_permitted(user, doc) and (admin or doc.status == "ready")
+        ]
 
 
 @router.post("/admin/documents", status_code=202)

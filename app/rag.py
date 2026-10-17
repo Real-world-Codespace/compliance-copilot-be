@@ -31,7 +31,7 @@ def embed(text: str) -> list[float]:
     return [value / norm for value in vector]
 
 
-def is_permitted(user: UserView, item: DocumentChunk) -> bool:
+def is_permitted(user: UserView, item: DocumentChunk | KnowledgeDocument) -> bool:
     if user.organization_id == item.organization_id and "workspace_admin" in user.roles:
         return True
     department_match = "all" in item.allowed_departments or user.department in item.allowed_departments

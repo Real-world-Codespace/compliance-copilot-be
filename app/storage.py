@@ -3,15 +3,25 @@
 from functools import lru_cache
 from io import BytesIO
 
-from .config import ENVIRONMENT, LOCAL_STORAGE_DIR, S3_BUCKET, S3_PRESIGNED_EXPIRY_SECONDS, S3_REGION, STORAGE_BACKEND
+from .config import (
+    AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN, ENVIRONMENT,
+    LOCAL_STORAGE_DIR, S3_BUCKET, S3_PRESIGNED_EXPIRY_SECONDS, S3_REGION, STORAGE_BACKEND,
+)
 
 
 class S3Storage:
     def __init__(self) -> None:
         if not S3_BUCKET:
             raise RuntimeError("S3_BUCKET chưa được cấu hình.")
+        if bool(AWS_ACCESS_KEY_ID) != bool(AWS_SECRET_ACCESS_KEY) or (AWS_SESSION_TOKEN and not AWS_ACCESS_KEY_ID):
+            raise RuntimeError("Cần cấu hình đầy đủ AWS_ACCESS_KEY_ID và AWS_SECRET_ACCESS_KEY.")
         import boto3
-        self.client = boto3.client("s3", region_name=S3_REGION)
+        credentials = {}
+        if AWS_ACCESS_KEY_ID:
+            credentials = {"aws_access_key_id": AWS_ACCESS_KEY_ID, "aws_secret_access_key": AWS_SECRET_ACCESS_KEY}
+            if AWS_SESSION_TOKEN:
+                credentials["aws_session_token"] = AWS_SESSION_TOKEN
+        self.client = boto3.client("s3", region_name=S3_REGION, **credentials)
 
     def upload(self, key: str, data: bytes, content_type: str) -> None:
         self.client.upload_fileobj(

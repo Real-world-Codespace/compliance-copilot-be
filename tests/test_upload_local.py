@@ -21,6 +21,9 @@ def test_upload_and_retrieve_document_locally(tmp_path, monkeypatch):
             with SessionLocal() as session:
                 document = session.get(KnowledgeDocument, result.json()["document_id"])
                 assert document.status == "ready", document.status_message
+            listing = client.get("/api/documents", headers={"Authorization": f"Bearer {token}"})
+            assert listing.status_code == 200
+            assert any(item["id"] == result.json()["document_id"] and item["original_filename"] == "policy.txt" and item["status"] == "ready" for item in listing.json())
             answer = client.post("/api/knowledge/ask", json={"token": token, "question": "MONSOON421"})
             assert answer.status_code == 200
             assert any(item["document_id"] == result.json()["document_id"] for item in answer.json()["citations"])

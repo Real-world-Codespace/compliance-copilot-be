@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 from pydantic import BaseModel, Field
@@ -22,6 +23,16 @@ class UserView(BaseModel):
     organization_id: str
     department: str
     roles: list[str]
+
+
+class DocumentView(BaseModel):
+    id: str
+    title: str
+    original_filename: str | None
+    source_type: str
+    classification: str
+    status: str
+    created_at: datetime
 
 
 class PolicyView(BaseModel):

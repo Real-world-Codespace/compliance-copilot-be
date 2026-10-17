@@ -31,12 +31,14 @@ def initialize_database():
         for name, definition in document_columns.items():
             if name not in existing_document_columns:
                 connection.execute(text(f"ALTER TABLE knowledge_documents ADD COLUMN {name} {definition}"))
+                if name == "status":
+                    connection.execute(text("UPDATE knowledge_documents SET status = 'ready' WHERE status IS NULL"))
         existing_chunk_columns = {column["name"] for column in inspect(engine).get_columns("document_chunks")}
         if "page_number" not in existing_chunk_columns:
             connection.execute(text("ALTER TABLE document_chunks ADD COLUMN page_number INTEGER"))
-        # pgvector was used in an earlier revision. Vectors now live in Pinecone.
+        # Never remove legacy vectors automatically on application startup.
         if "embedding" in existing_chunk_columns:
-            connection.execute(text("ALTER TABLE document_chunks DROP COLUMN embedding"))
+            raise RuntimeError("Legacy pgvector schema detected. Back up the database and apply backend/migrations/003_move_vectors_to_pinecone.sql before starting the API.")
     # Lightweight compatibility migration for local databases created before password auth.
     if "password_hash" not in {column["name"] for column in inspect(engine).get_columns("app_users")}:
         with engine.begin() as connection:
@@ -77,6 +79,9 @@ def initialize_database():
                     session.add(chunk)
             session.commit()
         else:
-            chunks_to_index = session.scalars(select(DocumentChunk)).all()
+            chunks_to_index = session.scalars(
+                select(DocumentChunk).join(KnowledgeDocument, KnowledgeDocument.id == DocumentChunk.document_id)
+                .where(KnowledgeDocument.status == "ready")
+            ).all()
     if chunks_to_index:
         index_chunks(chunks_to_index)

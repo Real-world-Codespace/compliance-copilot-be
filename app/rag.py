@@ -71,7 +71,7 @@ def ingest_text(user: UserView, title: str, content: str, classification: str, d
         session.add(KnowledgeDocument(
             id=document_id, organization_id=user.organization_id, title=title, source_type="text",
             classification=classification, allowed_departments=departments, allowed_roles=roles,
-            created_by=user.id, created_at=datetime.now(UTC),
+            created_by=user.id, created_at=datetime.now(UTC), status="processing",
         ))
         for position, part in enumerate(chunk_text(content)):
             chunk = DocumentChunk(
@@ -82,7 +82,19 @@ def ingest_text(user: UserView, title: str, content: str, classification: str, d
             chunks.append(chunk)
             session.add(chunk)
         session.commit()
-    index_chunks(chunks)
+    try:
+        index_chunks(chunks)
+    except Exception:
+        with SessionLocal() as session:
+            document = session.get(KnowledgeDocument, document_id)
+            document.status = "failed"
+            document.status_message = "Không thể lập chỉ mục tài liệu."
+            session.commit()
+        raise
+    with SessionLocal() as session:
+        document = session.get(KnowledgeDocument, document_id)
+        document.status = "ready"
+        session.commit()
     return document_id
 
 
@@ -91,9 +103,14 @@ def secure_retrieve(user: UserView, question: str, limit: int = 4) -> list[tuple
     matches = get_vector_store().query(namespace_for(user.organization_id), embed(question), user, limit)
     if not matches:
         return []
-    score_by_id = {match.id: match.score for match in matches}
+    score_by_id = {match.id: match.score for match in matches if match.score > 0}
+    if not score_by_id:
+        return []
     with SessionLocal() as session:
-        chunks = session.scalars(select(DocumentChunk).where(DocumentChunk.id.in_(score_by_id))).all()
+        chunks = session.scalars(
+            select(DocumentChunk).join(KnowledgeDocument, KnowledgeDocument.id == DocumentChunk.document_id)
+            .where(DocumentChunk.id.in_(score_by_id), KnowledgeDocument.status == "ready")
+        ).all()
     # RDS is authoritative: this protects against stale/tampered vector metadata too.
     permitted = [chunk for chunk in chunks if is_permitted(user, chunk)]
     return sorted(((chunk, round(score_by_id[chunk.id], 3)) for chunk in permitted), key=lambda item: item[1], reverse=True)

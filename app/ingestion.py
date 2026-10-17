@@ -38,10 +38,13 @@ def process_document(document_id: str) -> None:
                 )
                 indexed_chunks.append(chunk)
                 session.add(chunk)
+            session.commit()
+        index_chunks(indexed_chunks)
+        with SessionLocal() as session:
+            document = session.get(KnowledgeDocument, document_id)
             document.status = "ready"
             document.status_message = f"Đã lập chỉ mục {len(chunks)} chunks."
             session.commit()
-        index_chunks(indexed_chunks)
     except Exception as error:
         with SessionLocal() as session:
             document = session.get(KnowledgeDocument, document_id)

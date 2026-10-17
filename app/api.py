@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from .auth import current_user, login_with_password, register_account
-from .config import MAX_UPLOAD_SIZE_MB, S3_BUCKET
+from .config import MAX_UPLOAD_SIZE_MB, S3_BUCKET, STORAGE_BACKEND
 from .database import KnowledgeDocument, SessionLocal
 from .extractor import SUPPORTED_EXTENSIONS
 from .ingestion import process_document
@@ -67,7 +67,7 @@ async def upload_document(
     content = await file.read()
     if not content or len(content) > MAX_UPLOAD_SIZE_MB * 1024 * 1024:
         raise HTTPException(413, f"Tệp phải có nội dung và không vượt {MAX_UPLOAD_SIZE_MB} MB.")
-    if not S3_BUCKET:
+    if STORAGE_BACKEND == "s3" and not S3_BUCKET:
         raise HTTPException(503, "S3_BUCKET chưa được cấu hình cho môi trường này.")
     document_id = f"doc-{uuid.uuid4().hex[:16]}"
     filename = Path(file.filename or f"document{extension}").name
@@ -79,7 +79,7 @@ async def upload_document(
         allowed_roles=[item.strip() for item in allowed_roles.split(",") if item.strip()], created_by=user.id,
         original_filename=filename, content_type=file.content_type or "application/octet-stream", file_size=len(content),
         checksum=hashlib.sha256(content).hexdigest(), storage_key=storage_key, status="uploaded",
-        status_message="Tệp đã lưu S3, đang chờ worker lập chỉ mục bảo mật.", created_at=datetime.now(UTC),
+        status_message="Tệp đã được lưu, đang chờ worker lập chỉ mục bảo mật.", created_at=datetime.now(UTC),
     )
     with SessionLocal() as session:
         session.add(document)

@@ -8,6 +8,8 @@ CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 S3_REGION = os.getenv("S3_REGION", "ap-southeast-1")
 S3_BUCKET = os.getenv("S3_BUCKET", "")
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "s3" if ENVIRONMENT == "production" else "local").lower()
+LOCAL_STORAGE_DIR = Path(os.getenv("LOCAL_STORAGE_DIR", str(PROJECT_ROOT / "data" / "uploads")))
 S3_PRESIGNED_EXPIRY_SECONDS = int(os.getenv("S3_PRESIGNED_EXPIRY_SECONDS", "600"))
 MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", "25"))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

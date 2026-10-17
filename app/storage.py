@@ -3,7 +3,7 @@
 from functools import lru_cache
 from io import BytesIO
 
-from .config import S3_BUCKET, S3_PRESIGNED_EXPIRY_SECONDS, S3_REGION
+from .config import ENVIRONMENT, LOCAL_STORAGE_DIR, S3_BUCKET, S3_PRESIGNED_EXPIRY_SECONDS, S3_REGION, STORAGE_BACKEND
 
 
 class S3Storage:
@@ -33,6 +33,31 @@ class S3Storage:
         self.client.delete_object(Bucket=S3_BUCKET, Key=key)
 
 
+class LocalStorage:
+    """Local development only; files are private and never served by the web server."""
+    def _path(self, key: str):
+        root = LOCAL_STORAGE_DIR.resolve()
+        path = (root / key).resolve()
+        if not path.is_relative_to(root):
+            raise ValueError("Invalid storage key")
+        return path
+
+    def upload(self, key: str, data: bytes, content_type: str) -> None:
+        path = self._path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    def download(self, key: str) -> bytes:
+        return self._path(key).read_bytes()
+
+    def delete(self, key: str) -> None:
+        self._path(key).unlink(missing_ok=True)
+
+
 @lru_cache
-def get_storage() -> S3Storage:
-    return S3Storage()
+def get_storage() -> S3Storage | LocalStorage:
+    if STORAGE_BACKEND == "s3":
+        return S3Storage()
+    if STORAGE_BACKEND == "local" and ENVIRONMENT != "production":
+        return LocalStorage()
+    raise RuntimeError("Production requires STORAGE_BACKEND=s3; local storage is development-only.")
